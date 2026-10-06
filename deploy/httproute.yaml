@@ -1,0 +1,23 @@
+# Publishes the app through the platform's shared `public` Gateway. The route names no hostname, so
+# it takes the one of the listener it attaches to; the listener, its hostname and the TLS certificate
+# are the platform's and live in olljanat-ai/aks-fluxcd. Plain HTTP on that Gateway is redirected
+# to HTTPS by the platform as well, so only the HTTPS listener is attached to here.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: aks-hello
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      namespace: ingress-gateway
+      name: public
+      sectionName: https-example
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: aks-hello
+          port: 80

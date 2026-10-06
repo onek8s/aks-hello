@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- The release version. Merging a change of it to main publishes the image under this tag, and
+         deploy/deployment.yaml names the same tag - bump both in one pull request. -->
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+</Project>
