@@ -2,7 +2,7 @@
 
 A .NET hello world website, deployed by Flux to the `example` team namespace of the AKS clusters
 built by [aks-terraform](https://github.com/olljanat-ai/aks-terraform) and published to the
-internet through the platform's Gateway, on the AKS App Routing Gateway API implementation.
+internet through the platform's Gateway on Application Gateway for Containers.
 
 ## Layout
 
@@ -13,7 +13,6 @@ deploy/                  # what Flux applies to the `example` namespace
   deployment.yaml
   service.yaml
   httproute.yaml         # attaches to the platform's `public` Gateway
-  networkpolicy.yaml     # lets the Gateway's Envoy proxies reach the pods
   poddisruptionbudget.yaml
 .github/workflows/image.yml   # builds the image; publishes it to GHCR from main
 ```
@@ -26,12 +25,12 @@ routes to its app.
 | | Where | |
 | --- | --- | --- |
 | `example` namespace, its quota, network policy and Pod Security Standard | aks-terraform | Platform |
-| The Gateway API itself: managed CRDs and the App Routing `approuting-istio` GatewayClass | aks-terraform | Platform |
-| The `public` Gateway, its hostnames and listeners | aks-fluxcd | Platform |
+| The Gateway API itself: managed CRDs, the Application Gateway for Containers add-on and its subnet | aks-terraform | Platform |
+| The Application Gateway for Containers load balancer, the `public` Gateway, its hostnames and listeners | aks-fluxcd | Platform |
 | TLS: cert-manager, the Let's Encrypt issuer, the certificate of each listener | aks-fluxcd | Platform |
 | HTTP to HTTPS redirect | aks-fluxcd | Platform |
-| The Flux `GitRepository` and `Kustomization` that apply `deploy/`, and what they may do | aks-fluxcd (`tenants/example`) | Platform |
-| The app, its image, `Deployment`, `Service`, `HTTPRoute`, `NetworkPolicy` | this repository | Team |
+| The Flux `GitRepository` and `Kustomization` that apply `deploy/`, what they may do, and the `NetworkPolicy` that lets the load balancer reach the pods | aks-fluxcd (`tenants/example`) | Platform |
+| The app, its image, `Deployment`, `Service`, `HTTPRoute` | this repository | Team |
 
 The `HTTPRoute` names no hostname and no certificate. It attaches to the `https-example` listener of
 the `public` Gateway in `ingress-gateway`, which the platform restricts to routes from the
@@ -44,9 +43,7 @@ change the `example` namespace.
 
 [roles]: https://gateway-api.sigs.k8s.io/concepts/roles-and-personas/
 
-On the `prototype` cluster the listener's hostname is
-https://olljanat-aks-prototype.swedencentral.cloudapp.azure.com/ - the Azure DNS name of the
-Gateway's public IP, until the cluster has a domain of its own.
+The hostname is set per cluster in aks-fluxcd (`clusters/<cluster>/cluster-settings.yaml`).
 
 ## Running it locally
 

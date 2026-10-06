@@ -11,5 +11,4 @@ resources:
   - deployment.yaml
   - service.yaml
   - httproute.yaml
-  - networkpolicy.yaml
   - poddisruptionbudget.yaml
