@@ -27,7 +27,8 @@ routes to its app.
 | `example` namespace, its quota, network policy and Pod Security Standard | aks-terraform | Platform |
 | The Gateway API itself: managed CRDs, the Application Gateway for Containers add-on and its subnet | aks-terraform | Platform |
 | The Application Gateway for Containers load balancer, the `public` Gateway, its hostnames and listeners | aks-fluxcd | Platform |
-| TLS: cert-manager, the Let's Encrypt issuer, the certificate of each listener | aks-fluxcd | Platform |
+| TLS: the certificate of each listener, kept in Key Vault | aks-fluxcd | Platform |
+| DNS: the hostname's record in Azure DNS, kept by external-dns | aks-fluxcd | Platform |
 | HTTP to HTTPS redirect | aks-fluxcd | Platform |
 | The Flux `GitRepository` and `Kustomization` that apply `deploy/`, what they may do, and the `NetworkPolicy` that lets the load balancer reach the pods | aks-fluxcd (`tenants/example`) | Platform |
 | The app, its image, `Deployment`, `Service`, `HTTPRoute` | this repository | Team |
