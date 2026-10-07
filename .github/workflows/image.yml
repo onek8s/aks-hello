@@ -2,8 +2,8 @@ name: Image
 
 # Pull requests build the image to prove it builds. A push to main publishes it to GHCR, tagged with
 # the <Version> in src/AksHello/AksHello.csproj - so a release is a pull request that bumps that
-# version and the tag in deploy/deployment.yaml together. A version that is already published is
-# never overwritten.
+# version. A version that is already published is never overwritten. Rolling it out is a change to
+# olljanat-ai/aks-fluxcd-example, where the manifests live.
 
 on:
   pull_request:
@@ -37,15 +37,6 @@ jobs:
           version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/AksHello/AksHello.csproj)"
           test -n "$version" || { echo "::error::No <Version> in src/AksHello/AksHello.csproj"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      # The manifest deploys exactly the version the project builds; a bump of one without the other
-      # would deploy an image that is not there, or one that is not this code.
-      - name: Check the manifest names the same version
-        run: |
-          grep -q "image: ${IMAGE}:${{ steps.version.outputs.version }}$" deploy/deployment.yaml || {
-            echo "::error file=deploy/deployment.yaml::The image tag must be ${{ steps.version.outputs.version }}, the <Version> of the project"
-            exit 1
-          }
 
       - uses: docker/setup-buildx-action@v4
 
