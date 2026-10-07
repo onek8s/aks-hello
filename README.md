@@ -2,7 +2,7 @@
 
 A .NET hello world website, deployed by Flux to the `example` team namespace of the AKS clusters
 built by [aks-terraform](https://github.com/olljanat-ai/aks-terraform) and published through the
-platform's Gateway, Traefik Hub API Gateway behind an Azure internal load balancer.
+platform's Gateway, Traefik Proxy behind an Azure internal load balancer.
 
 This repository holds the app and builds its image. The Kubernetes manifests that deploy it -
 `Deployment`, `Service`, `HTTPRoute`, `PodDisruptionBudget` - live in
