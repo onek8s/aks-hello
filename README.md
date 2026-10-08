@@ -15,7 +15,7 @@ for who owns what and how it is applied.
 ```
 src/AksHello/            # ASP.NET Core minimal app: `/` serves the page, `/healthz` the probes
 Dockerfile               # SDK build, chiseled non-root ASP.NET Core runtime image
-.github/workflows/image.yml   # builds the image; publishes it to GHCR from main
+.github/workflows/image.yml   # builds the image; publishes it to ACR from main
 ```
 
 ## Running it locally
@@ -28,7 +28,8 @@ docker build -t aks-hello . && docker run --rm -p 8080:8080 aks-hello
 
 ## Releasing
 
-The image is published to `ghcr.io/olljanat-ai/aks-hello`, tagged with the `<Version>` in
+The image is published to `acrsecprototypeshared.azurecr.io/aks-hello`, the environment's Azure
+Container Registry, tagged with the `<Version>` in
 `src/AksHello/AksHello.csproj`. To release:
 
 1. Bump `<Version>` in `src/AksHello/AksHello.csproj`.
@@ -42,7 +43,8 @@ bump it publishes nothing.
 
 ## Access to the image
 
-The image package is private. The nodes pull it with the `ghcr-pull` secret in the `example`
-namespace - see [olljanat-ai/aks-fluxcd-example](https://github.com/olljanat-ai/aks-fluxcd-example)
-for how it is created. Once the package is made public (package settings on GitHub) the secret is
-not needed. The cluster no longer reads this repository itself.
+The registry is private. The clusters pull the image as their kubelet identities, which have
+`AcrPull` on it (aks-terraform) - no pull secret. Publishing signs in to the registry as the
+environment's deployment service principal, which has `AcrPush`: the repository (or organization)
+variable `AZURE_CLIENT_ID` and secret `AZURE_CLIENT_SECRET`. The cluster does not read this
+repository itself.
