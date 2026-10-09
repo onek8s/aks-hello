@@ -1,9 +1,14 @@
 name: Image
 
-# Pull requests build the image to prove it builds. A push to main publishes it to GHCR, tagged with
-# the <Version> in src/AksHello/AksHello.csproj - so a release is a pull request that bumps that
-# version. A version that is already published is never overwritten. Rolling it out is a change to
-# olljanat-ai/aks-fluxcd-example, where the manifests live.
+# Pull requests build the image to prove it builds. A push to main publishes it to the environment's
+# Azure Container Registry, tagged with the <Version> in src/AksHello/AksHello.csproj - so a release
+# is a pull request that bumps that version. A version that is already published is never
+# overwritten. Rolling it out is a change to olljanat-ai/aks-fluxcd-example, where the manifests live.
+# The clusters pull it as their kubelet identities, which have AcrPull there - no pull secret.
+#
+# Credentials: the environment's deployment service principal, which has AcrPush on the registry
+# (aks-terraform, shared/) - the repository (or organization) variable AZURE_CLIENT_ID and the
+# secret AZURE_CLIENT_SECRET, signing in to the registry as that principal.
 
 on:
   pull_request:
@@ -19,7 +24,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  IMAGE: ghcr.io/${{ github.repository }}
+  REGISTRY: acrsecprototypeshared.azurecr.io
+  IMAGE: acrsecprototypeshared.azurecr.io/aks-hello
 
 jobs:
   image:
@@ -27,7 +33,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v7
 
@@ -43,9 +48,9 @@ jobs:
       - uses: docker/login-action@v4
         if: github.event_name != 'pull_request'
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ vars.AZURE_CLIENT_ID }}
+          password: ${{ secrets.AZURE_CLIENT_SECRET }}
 
       - name: Check whether the version is already published
         id: published
