@@ -1,14 +1,10 @@
 name: Image
 
-# Pull requests build the image to prove it builds. A push to main publishes it to the environment's
-# Azure Container Registry, tagged with the <Version> in src/AksHello/AksHello.csproj - so a release
-# is a pull request that bumps that version. A version that is already published is never
-# overwritten. Rolling it out is a change to olljanat-ai/aks-fluxcd-example, where the manifests live.
-# The clusters pull it as their kubelet identities, which have AcrPull there - no pull secret.
-#
-# Credentials: the environment's deployment service principal, which has AcrPush on the registry
-# (aks-terraform, shared/) - the repository (or organization) variable AZURE_CLIENT_ID and the
-# secret AZURE_CLIENT_SECRET, signing in to the registry as that principal.
+# Builds the image on every pull request and push to main, to prove it builds. Nothing is published
+# from here and this repository holds no cloud credential: the environment's Azure Container Registry
+# builds the image itself, from this public repository at a pinned commit, under the <Version> of
+# src/AksHello/AksHello.csproj (onek8s/aks-terraform, shared/envs/<environment>.tfvars:
+# container_registry_builds). The clusters pull it from there as their kubelet identities.
 
 on:
   pull_request:
@@ -23,16 +19,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-env:
-  REGISTRY: acrsecprototypeshared.azurecr.io
-  IMAGE: acrsecprototypeshared.azurecr.io/aks-hello
-
 jobs:
   image:
-    name: Build and publish
+    name: Build
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v7
 
@@ -45,38 +35,24 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v4
-        if: github.event_name != 'pull_request'
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ vars.AZURE_CLIENT_ID }}
-          password: ${{ secrets.AZURE_CLIENT_SECRET }}
-
-      - name: Check whether the version is already published
-        id: published
-        if: github.event_name != 'pull_request'
-        run: |
-          if docker buildx imagetools inspect "${IMAGE}:${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
-            echo "::notice::${IMAGE}:${{ steps.version.outputs.version }} is already published; bump <Version> to publish this commit"
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - uses: docker/metadata-action@v6
-        id: meta
-        with:
-          images: ${{ env.IMAGE }}
-          tags: |
-            type=raw,value=${{ steps.version.outputs.version }}
-            type=sha,format=long
-
       - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' && steps.published.outputs.exists == 'false' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          push: false
+          load: true
+          tags: aks-hello:${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # The page names the cluster it runs in.
+      - name: Smoke test
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          docker run -d --name hello -p 8080:8080 -e CLUSTER_NAME=ci-smoke-test "aks-hello:${VERSION}"
+          for _ in $(seq 1 30); do curl -fsS http://localhost:8080/healthz >/dev/null 2>&1 && break; sleep 1; done
+          curl -fsS http://localhost:8080/ | tee page.html | grep -q 'ci-smoke-test'
+          grep -q "$VERSION" page.html
+          docker rm -f hello
