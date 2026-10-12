@@ -65,3 +65,23 @@ jobs:
           curl -fsS http://localhost:8080/ | tee page.html | grep -q 'ci-smoke-test'
           grep -q "$VERSION" page.html
           docker rm -f hello
+
+  # The way the environment's registry builds it: an ACR task runs the classic builder on an amd64
+  # host, with the target architecture as a build argument. Nothing runs under emulation - the SDK
+  # stage builds on the host's architecture - so this proves the arm64 image builds there too.
+  registry:
+    name: Build like the registry (linux/arm64 on amd64, classic builder)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build
+        env:
+          DOCKER_BUILDKIT: "0"
+        run: docker build --platform linux/arm64 --build-arg TARGETARCH=arm64 -t aks-hello:registry .
+
+      - name: Check the architecture
+        run: |
+          arch="$(docker image inspect aks-hello:registry --format '{{.Architecture}}')"
+          echo "$arch"
+          test "$arch" = arm64
