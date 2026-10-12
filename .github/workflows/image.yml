@@ -5,6 +5,7 @@ name: Image
 # builds the image itself, from this public repository at a pinned commit, under the <Version> of
 # src/AksHello/AksHello.csproj (onek8s/aks-terraform, shared/envs/<environment>.tfvars:
 # container_registry_builds). The clusters pull it from there as their kubelet identities.
+# Built and smoke-tested on both architectures the clusters' nodes can have, each on a native runner.
 
 on:
   pull_request:
@@ -21,8 +22,16 @@ concurrency:
 
 jobs:
   image:
-    name: Build
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
 
@@ -38,12 +47,12 @@ jobs:
       - uses: docker/build-push-action@v7
         with:
           context: .
-          platforms: linux/amd64
+          platforms: ${{ matrix.platform }}
           push: false
           load: true
           tags: aks-hello:${{ steps.version.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
 
       # The page names the cluster it runs in.
       - name: Smoke test
