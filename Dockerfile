@@ -7,15 +7,17 @@
 # runtime stage, which runs nothing, takes the target's base image. BuildKit sets BUILDPLATFORM,
 # TARGETPLATFORM and TARGETARCH by itself; the classic builder of an ACR task, on an amd64 host,
 # gets the two target ones as build arguments (onek8s/aks-terraform, container_registry_builds).
-ARG BUILDPLATFORM=linux/amd64
-ARG TARGETPLATFORM=linux/amd64
+# No defaults here: a default would override what BuildKit sets. Left empty, the classic builder
+# uses its own platform and the SDK its own architecture.
+ARG BUILDPLATFORM
+ARG TARGETPLATFORM
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
-ARG TARGETARCH=amd64
+ARG TARGETARCH
 WORKDIR /src
 COPY src/AksHello/AksHello.csproj AksHello/
-RUN dotnet restore AksHello/AksHello.csproj -a "$TARGETARCH"
+RUN dotnet restore AksHello/AksHello.csproj ${TARGETARCH:+-a "$TARGETARCH"}
 COPY src/AksHello/ AksHello/
-RUN dotnet publish AksHello/AksHello.csproj -a "$TARGETARCH" --no-self-contained --configuration Release --no-restore --output /app
+RUN dotnet publish AksHello/AksHello.csproj ${TARGETARCH:+-a "$TARGETARCH"} --no-self-contained --configuration Release --no-restore --output /app
 
 FROM --platform=$TARGETPLATFORM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled
 WORKDIR /app
