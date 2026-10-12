@@ -6,9 +6,8 @@
 # one, so an arm64 image never runs the compiler under emulation (it crashes there), and the
 # runtime stage, which runs nothing, takes the target's base image. BuildKit sets BUILDPLATFORM,
 # TARGETPLATFORM and TARGETARCH by itself; the classic builder of an ACR task, on an amd64 host,
-# gets the two target ones as build arguments (onek8s/aks-terraform, container_registry_builds).
-# No defaults here: a default would override what BuildKit sets. Left empty, the classic builder
-# uses its own platform and the SDK its own architecture.
+# gets all three as build arguments (onek8s/aks-terraform, container_registry_builds). No defaults
+# here: a default would override what BuildKit sets.
 ARG BUILDPLATFORM
 ARG TARGETPLATFORM
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build

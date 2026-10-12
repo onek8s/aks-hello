@@ -67,7 +67,7 @@ jobs:
           docker rm -f hello
 
   # The way the environment's registry builds it: an ACR task runs the classic builder on its amd64
-  # host, with the target platform as build arguments. Nothing runs under emulation - the SDK stage
+  # host, with the platforms as build arguments. Nothing runs under emulation - the SDK stage
   # builds on the host's architecture - so this proves the arm64 image builds there too.
   registry:
     name: Build like the registry (linux/arm64 on amd64, classic builder)
@@ -78,7 +78,9 @@ jobs:
       - name: Build
         env:
           DOCKER_BUILDKIT: "0"
-        run: docker build --build-arg TARGETARCH=arm64 --build-arg TARGETPLATFORM=linux/arm64 -t aks-hello:registry .
+        run: |
+          docker build --build-arg BUILDPLATFORM=linux/amd64 --build-arg TARGETPLATFORM=linux/arm64 \
+            --build-arg TARGETARCH=arm64 -t aks-hello:registry .
 
       - name: Check the architecture
         run: |
