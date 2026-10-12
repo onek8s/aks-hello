@@ -1,0 +1,19 @@
+# The arm64 image, built on an amd64 host - the environment's registry, whose ACR tasks run on
+# amd64 (onek8s/aks-terraform, container_registry_builds). The SDK runs natively and publishes for
+# arm64: under emulation the C# compiler crashes. The runtime stage only copies files, so it can
+# take the arm64 image without running anything. Fixed tags rather than build arguments or
+# `--platform`, which the registry's dependency scanner cannot read. Keep in step with Dockerfile.
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+COPY src/AksHello/AksHello.csproj AksHello/
+RUN dotnet restore AksHello/AksHello.csproj -a arm64
+COPY src/AksHello/ AksHello/
+RUN dotnet publish AksHello/AksHello.csproj -a arm64 --no-self-contained --configuration Release --no-restore --output /app
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-arm64v8
+WORKDIR /app
+COPY --from=build /app .
+# The runtime images listen on 8080 by default.
+EXPOSE 8080
+USER 1654
+ENTRYPOINT ["dotnet", "AksHello.dll"]
