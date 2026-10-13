@@ -54,7 +54,7 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
 
-      # The page names the cluster it runs in.
+      # The page and /status name the cluster it runs in; the probes answer.
       - name: Smoke test
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -64,6 +64,10 @@ jobs:
           for _ in $(seq 1 30); do curl -fsS http://localhost:8080/healthz >/dev/null 2>&1 && break; sleep 1; done
           curl -fsS http://localhost:8080/ | tee page.html | grep -q 'ci-smoke-test'
           grep -q "$VERSION" page.html
+          curl -fsS http://localhost:8080/health/live
+          curl -fsS http://localhost:8080/health/ready
+          curl -fsS http://localhost:8080/status | tee status.json | grep -q '"cluster":"ci-smoke-test"'
+          grep -q "\"version\":\"$VERSION" status.json
           docker rm -f hello
 
   # The way the environment's registry builds the arm64 image: Dockerfile.arm64 with the classic
