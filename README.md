@@ -16,7 +16,7 @@ for who owns what and how it is applied.
 ## Layout
 
 ```
-src/AksHello/            # ASP.NET Core minimal app: `/` serves the page, `/healthz` the probes
+src/AksHello/            # ASP.NET Core minimal app: `/` the page, `/status` JSON, `/health/*` probes
 Dockerfile               # SDK build, chiseled non-root ASP.NET Core runtime image
 .github/workflows/image.yml   # builds and smoke-tests the image
 ```
@@ -48,6 +48,16 @@ The registry is private. The clusters pull the image as their kubelet identities
 `AcrPull` on it (aks-terraform) - no pull secret. Nothing publishes from this repository, so it
 holds no cloud credential; the registry reads it anonymously, as a public repository. The cluster
 does not read this repository itself.
+
+## Endpoints
+
+| Path | What |
+|---|---|
+| `/` | The page: cluster, pod, version |
+| `/status` | The same as JSON, plus node (`NODE_NAME`), architecture, start time, uptime and readiness |
+| `/health/live` | Liveness: 200 while the process answers HTTP; checks nothing else |
+| `/health/ready` | Readiness: 200 from the end of startup until SIGTERM, then 503 |
+| `/healthz` | All checks (the probe path before 0.3.0) |
 
 ## Which cluster answered
 
