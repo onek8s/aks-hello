@@ -16,7 +16,7 @@ for who owns what and how it is applied.
 ## Layout
 
 ```
-src/AksHello/            # ASP.NET Core minimal app: `/` the page, `/status` JSON, `/weather` JSON, `/health/*` probes
+src/AksHello/            # ASP.NET Core minimal app: `/` the page, `/status`, `/weather` and `/public-ip` JSON, `/health/*` probes
 Dockerfile               # SDK build, chiseled non-root ASP.NET Core runtime image
 .github/workflows/image.yml   # builds and smoke-tests the image
 ```
@@ -32,6 +32,18 @@ failed fetch is shown on the page and at `/weather` with its reason and logged a
 most once a minute per pod; it never fails a probe. From 0.4.1 the forecast is refreshed in the background (every
 minute, within the cache time), so the page never waits for the internet and the dependency shows in the
 firewall's log even without visitors.
+
+## The node's public IP (0.5.0)
+
+The page and `/status` (`nodePublicIp`) also show the public IP the pod reaches the internet from, as an
+"echo my address" service sees it: by default `https://api.ipify.org` (no API key). It is what tells a
+visitor which address the platform's egress - a NAT gateway, an egress gateway, or the node itself - gave
+this pod, and a second outbound dependency for the egress control. It is checked once, when the pod
+starts (up to three attempts five seconds apart, for an egress that is not ready the moment the pod is),
+and kept in memory for the life of the pod: nothing asks again, and a pod that found nothing shows the
+reason on the page and at `/public-ip` until it is restarted. The check runs in the background, so the
+app is ready without waiting for it. `PUBLIC_IP_URL` names another URL that answers a plain-text IP
+address, and `PUBLIC_IP_DISABLED=true` turns it off. It never fails a probe.
 
 ## Running it locally
 
@@ -65,8 +77,10 @@ does not read this repository itself.
 
 | Path | What |
 |---|---|
-| `/` | The page: cluster, pod, version |
+| `/` | The page: cluster, pod, version, the node's public IP, the weather forecast |
 | `/status` | The same as JSON, plus node (`NODE_NAME`), architecture, start time, uptime and readiness |
+| `/weather` | The forecast as JSON, or why there is none |
+| `/public-ip` | The node's public IP found when the pod started, or why none was |
 | `/health/live` | Liveness: 200 while the process answers HTTP; checks nothing else |
 | `/health/ready` | Readiness: 200 from the end of startup until SIGTERM, then 503 |
 | `/healthz` | All checks (the probe path before 0.3.0) |

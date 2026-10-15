@@ -71,6 +71,11 @@ jobs:
           # The forecast comes from the internet; the runner reaches it, so the page shows one
           curl -fsS http://localhost:8080/weather | tee weather.json | grep -q '"error":null'
           grep -q 'class="weather"' <(curl -fsS http://localhost:8080/)
+          # The node's public IP is checked once at start, in the background; the runner reaches the service
+          for _ in $(seq 1 30); do curl -fsS http://localhost:8080/public-ip | grep -qv '"checkedAt":null' && break; sleep 1; done
+          curl -fsS http://localhost:8080/public-ip | tee public-ip.json | grep -q '"error":null'
+          grep -q '"nodePublicIp":"' <(curl -fsS http://localhost:8080/status)
+          grep -q 'class="public-ip"' <(curl -fsS http://localhost:8080/)
           docker rm -f hello
 
   # The way the environment's registry builds the arm64 image: Dockerfile.arm64 with the classic

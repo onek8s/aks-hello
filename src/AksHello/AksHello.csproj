@@ -8,7 +8,7 @@
     <!-- The release version, and the image tag: onek8s/aks-terraform builds the image of a commit
          into the environment's registry under it, and onek8s/aks-fluxcd-example then rolls it out by
          naming the tag. -->
-    <Version>0.4.1</Version>
+    <Version>0.5.0</Version>
   </PropertyGroup>
 
 </Project>
