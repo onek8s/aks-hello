@@ -68,6 +68,9 @@ jobs:
           curl -fsS http://localhost:8080/health/ready
           curl -fsS http://localhost:8080/status | tee status.json | grep -q '"cluster":"ci-smoke-test"'
           grep -q "\"version\":\"$VERSION" status.json
+          # The forecast comes from the internet; the runner reaches it, so the page shows one
+          curl -fsS http://localhost:8080/weather | tee weather.json | grep -q '"error":null'
+          grep -q 'class="weather"' <(curl -fsS http://localhost:8080/)
           docker rm -f hello
 
   # The way the environment's registry builds the arm64 image: Dockerfile.arm64 with the classic
