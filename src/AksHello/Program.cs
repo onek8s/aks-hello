@@ -18,6 +18,8 @@ builder.Services.AddHttpClient("weather", client =>
     client.DefaultRequestHeaders.UserAgent.ParseAdd("aks-hello (+https://github.com/onek8s/aks-hello)");
 });
 builder.Services.AddSingleton<Weather>();
+// Keeps the forecast fresh whether anyone looks at the page or not: the page never waits for the internet.
+builder.Services.AddHostedService<WeatherRefresher>();
 
 var app = builder.Build();
 var started = DateTimeOffset.UtcNow;
@@ -181,4 +183,25 @@ record Forecast(string Place, string? Source, ForecastDay[] Days, string? Error,
         : $"<p class=\"weather\">Weather in {WebUtility.HtmlEncode(Place)} (from <code>{WebUtility.HtmlEncode(Source)}</code>): "
           + string.Join(" &middot; ", Days.Select(d => $"{WebUtility.HtmlEncode(d.Date)} {d.MinCelsius:0.#}&hellip;{d.MaxCelsius:0.#} &deg;C, {d.PrecipitationMm:0.#} mm"))
           + "</p>";
+}
+
+// Refreshes the cached forecast every minute (the cache decides whether that fetches anything).
+sealed class WeatherRefresher(Weather weather) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(60));
+        do
+        {
+            try
+            {
+                await weather.GetAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+        }
+        while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
 }

@@ -29,7 +29,9 @@ dependency for the platform's egress control to decide on (OneK8s design section
 the same response shape (latitude and longitude are part of it), `WEATHER_PLACE` the place shown,
 `WEATHER_CACHE_SECONDS` how long a forecast is kept (600), and `WEATHER_DISABLED=true` turns it off. A
 failed fetch is shown on the page and at `/weather` with its reason and logged as a warning, retried at
-most once a minute per pod; it never fails a probe.
+most once a minute per pod; it never fails a probe. From 0.4.1 the forecast is refreshed in the background (every
+minute, within the cache time), so the page never waits for the internet and the dependency shows in the
+firewall's log even without visitors.
 
 ## Running it locally
 
