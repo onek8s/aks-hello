@@ -16,10 +16,20 @@ for who owns what and how it is applied.
 ## Layout
 
 ```
-src/AksHello/            # ASP.NET Core minimal app: `/` the page, `/status` JSON, `/health/*` probes
+src/AksHello/            # ASP.NET Core minimal app: `/` the page, `/status` JSON, `/weather` JSON, `/health/*` probes
 Dockerfile               # SDK build, chiseled non-root ASP.NET Core runtime image
 .github/workflows/image.yml   # builds and smoke-tests the image
 ```
+
+## The weather forecast (0.4.0)
+
+The page also shows a three-day forecast fetched from the internet, so the app has a real outbound
+dependency for the platform's egress control to decide on (OneK8s design section 16): by default
+`https://api.open-meteo.com/v1/forecast` (no API key) for Helsinki. `WEATHER_URL` names another URL with
+the same response shape (latitude and longitude are part of it), `WEATHER_PLACE` the place shown,
+`WEATHER_CACHE_SECONDS` how long a forecast is kept (600), and `WEATHER_DISABLED=true` turns it off. A
+failed fetch is shown on the page and at `/weather` with its reason and logged as a warning, retried at
+most once a minute per pod; it never fails a probe.
 
 ## Running it locally
 
