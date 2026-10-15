@@ -20,6 +20,16 @@ builder.Services.AddHttpClient("weather", client =>
 builder.Services.AddSingleton<Weather>();
 // Keeps the forecast fresh whether anyone looks at the page or not: the page never waits for the internet.
 builder.Services.AddHostedService<WeatherRefresher>();
+// The public IP the node reaches the internet from (PUBLIC_IP_URL), checked once when the pod starts and
+// kept in memory: the second outbound dependency, and what tells a visitor which address the platform's
+// egress (NAT gateway, egress gateway, or the node itself) gave this pod.
+builder.Services.AddHttpClient("public-ip", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(5);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("aks-hello (+https://github.com/onek8s/aks-hello)");
+});
+builder.Services.AddSingleton<PublicIp>();
+builder.Services.AddHostedService<PublicIpChecker>();
 
 var app = builder.Build();
 var started = DateTimeOffset.UtcNow;
@@ -31,7 +41,7 @@ var version = Assembly.GetExecutingAssembly()
 // served by several clusters at once, it is what tells a visitor which one answered.
 var cluster = Environment.GetEnvironmentVariable("CLUSTER_NAME") is { Length: > 0 } name ? name : "unknown";
 
-app.MapGet("/", async (Weather weather, CancellationToken cancellationToken) => Results.Content($$"""
+app.MapGet("/", async (Weather weather, PublicIp publicIp, CancellationToken cancellationToken) => Results.Content($$"""
     <!doctype html>
     <html lang="en">
     <head>
@@ -47,6 +57,7 @@ app.MapGet("/", async (Weather weather, CancellationToken cancellationToken) => 
         .cluster { font-size: 1.5rem; color: #1f2933; }
         .weather { margin-top: 1.5rem; }
         .weather.error { color: #ab091e; }
+        .public-ip.error { color: #ab091e; }
       </style>
     </head>
     <body>
@@ -55,6 +66,7 @@ app.MapGet("/", async (Weather weather, CancellationToken cancellationToken) => 
         <p class="cluster">Cluster <code>{{WebUtility.HtmlEncode(cluster)}}</code></p>
         <p>Served by .NET {{WebUtility.HtmlEncode(Environment.Version.ToString())}} from pod <code>{{WebUtility.HtmlEncode(Environment.MachineName)}}</code>.</p>
         <p>Version <code>{{WebUtility.HtmlEncode(version)}}</code></p>
+        {{publicIp.Current.ToHtml()}}
         {{(await weather.GetAsync(cancellationToken)).ToHtml()}}
       </main>
     </body>
@@ -72,12 +84,16 @@ app.MapHealthChecks("/healthz");
 // The forecast as JSON: what the page shows, or why there is none.
 app.MapGet("/weather", async (Weather weather, CancellationToken cancellationToken) => await weather.GetAsync(cancellationToken));
 
+// The node's public IP as JSON: what was found when the pod started, or why nothing was.
+app.MapGet("/public-ip", (PublicIp publicIp) => publicIp.Current);
+
 // What is running where, for people and scripts: the same facts as the page, as JSON.
-app.MapGet("/status", (IHostApplicationLifetime lifetime) => new Status(
+app.MapGet("/status", (IHostApplicationLifetime lifetime, PublicIp publicIp) => new Status(
     Name: "aks-hello",
     Version: version,
     Cluster: cluster,
     Node: Environment.GetEnvironmentVariable("NODE_NAME") is { Length: > 0 } node ? node : "unknown",
+    NodePublicIp: publicIp.Current.Address,
     Pod: Environment.MachineName,
     Runtime: $".NET {Environment.Version}",
     Architecture: System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant(),
@@ -92,6 +108,7 @@ record Status(
     string Version,
     string Cluster,
     string Node,
+    string? NodePublicIp,
     string Pod,
     string Runtime,
     string Architecture,
@@ -102,6 +119,7 @@ record Status(
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(Status))]
 [JsonSerializable(typeof(Forecast))]
+[JsonSerializable(typeof(PublicIpResult))]
 partial class AppJsonContext : JsonSerializerContext;
 
 sealed class LifetimeCheck(IHostApplicationLifetime lifetime) : IHealthCheck
@@ -203,5 +221,80 @@ sealed class WeatherRefresher(Weather weather) : BackgroundService
             }
         }
         while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+}
+
+// The public IP the node reaches the internet from, as an "echo my address" service sees it: by default
+// api.ipify.org (no API key), or whatever PUBLIC_IP_URL names that answers a plain-text IP address. Found
+// once when the pod starts and kept in memory - the address does not change for the life of a pod on a
+// node, so nothing asks again; a pod that found nothing says so until it is restarted.
+sealed class PublicIp(IHttpClientFactory httpClientFactory, ILogger<PublicIp> logger)
+{
+    readonly string? url = Environment.GetEnvironmentVariable("PUBLIC_IP_URL") is { Length: > 0 } value ? value
+        : Environment.GetEnvironmentVariable("PUBLIC_IP_DISABLED") == "true" ? null
+        : "https://api.ipify.org";
+
+    public PublicIpResult Current { get; private set; } = new(null, null, "not checked yet", null);
+
+    // One check: a few attempts a few seconds apart, for an egress that is not ready the moment the pod is.
+    public async Task CheckAsync(CancellationToken cancellationToken)
+    {
+        if (url is null)
+        {
+            Current = new PublicIpResult(null, null, "the public IP check is turned off (PUBLIC_IP_DISABLED)", DateTimeOffset.UtcNow);
+            return;
+        }
+        var source = new Uri(url).Host;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var response = await httpClientFactory.CreateClient("public-ip").GetAsync(url, cancellationToken);
+                response.EnsureSuccessStatusCode();
+                var text = (await response.Content.ReadAsStringAsync(cancellationToken)).Trim();
+                if (!IPAddress.TryParse(text, out var address))
+                    throw new FormatException($"not an IP address: \"{(text.Length > 40 ? text[..40] + "..." : text)}\"");
+                Current = new PublicIpResult(address.ToString(), source, null, DateTimeOffset.UtcNow);
+                logger.LogInformation("Node public IP {Address} (from {Source})", address, source);
+                return;
+            }
+            catch (Exception e) when (!cancellationToken.IsCancellationRequested
+                && e is HttpRequestException or TaskCanceledException or FormatException)
+            {
+                var reason = e is TaskCanceledException ? "timed out" : e.GetBaseException().Message;
+                if (attempt < 3)
+                {
+                    logger.LogWarning("Node public IP from {Source} failed (attempt {Attempt} of 3): {Reason}", source, attempt, reason);
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                    continue;
+                }
+                logger.LogWarning("Node public IP from {Source} failed: {Reason}", source, reason);
+                Current = new PublicIpResult(null, source, $"no public IP from {source}: {reason}", DateTimeOffset.UtcNow);
+                return;
+            }
+        }
+    }
+}
+
+record PublicIpResult(string? Address, string? Source, string? Error, DateTimeOffset? CheckedAt)
+{
+    public string ToHtml() => Error is not null
+        ? $"<p class=\"public-ip error\">Node public IP: {WebUtility.HtmlEncode(Error)}</p>"
+        : $"<p class=\"public-ip\">Node public IP <code>{WebUtility.HtmlEncode(Address)}</code> (from <code>{WebUtility.HtmlEncode(Source)}</code>, checked when the pod started)</p>";
+}
+
+// Runs the one public IP check when the pod starts. In the background: the app serves, and is ready,
+// without waiting for it, and the page shows "not checked yet" for the moment it takes.
+sealed class PublicIpChecker(PublicIp publicIp) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            await publicIp.CheckAsync(stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+        }
     }
 }
