@@ -24,7 +24,7 @@ Dockerfile               # SDK build, chiseled non-root ASP.NET Core runtime ima
 ## The weather forecast (0.4.0)
 
 The page also shows a three-day forecast fetched from the internet, so the app has a real outbound
-dependency for the platform's egress control to decide on (OneK8s design section 17): by default
+dependency for the platform's egress control to decide on (OneK8s design section 5.1): by default
 `https://api.open-meteo.com/v1/forecast` (no API key) for Helsinki. `WEATHER_URL` names another URL with
 the same response shape (latitude and longitude are part of it), `WEATHER_PLACE` the place shown,
 `WEATHER_CACHE_SECONDS` how long a forecast is kept (600), and `WEATHER_DISABLED=true` turns it off. A
