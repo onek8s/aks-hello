@@ -2,9 +2,19 @@ using System.Net;
 using System.Reflection;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateSlimBuilder(args);
+// Two plain-HTTP ports (design D69): 8080 speaks HTTP/1.1 - the kubelet's probes until Kubernetes 1.38 -
+// and 8081 HTTP/2 only, cleartext with prior knowledge (h2c), for the gateway. Kestrel's default,
+// Http1AndHttp2, is HTTP/1.1 alone on a port without TLS (no ALPN to agree on HTTP/2), so a gateway
+// speaking h2c to it fails - which 0.5.1 did behind Traefik (500 on every route, 2026-10-18).
+builder.WebHost.ConfigureKestrel(kestrel =>
+{
+    kestrel.ListenAnyIP(8080, listen => listen.Protocols = HttpProtocols.Http1);
+    kestrel.ListenAnyIP(8081, listen => listen.Protocols = HttpProtocols.Http2);
+});
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonContext.Default));
 // Readiness: the pod takes traffic from the moment the app has started until it is told to stop.
