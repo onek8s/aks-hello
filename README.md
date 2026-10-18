@@ -33,13 +33,16 @@ most once a minute per pod; it never fails a probe. From 0.4.1 the forecast is r
 minute, within the cache time), so the page never waits for the internet and the dependency shows in the
 firewall's log even without visitors.
 
-## Which HTTP version reached the pod (0.5.1)
+## Which HTTP version reached the pod (0.5.1), and the h2c port (0.5.2)
 
 `/status` reports `protocol`: `HTTP/2` when the caller connected over HTTP/2 cleartext with prior knowledge
-(h2c), `HTTP/1.1` otherwise. Kestrel serves both on the plain port 8080 by default. The OneK8s platform
-connects its gateways to pods over h2c only (design D69, "HTTP/1.1 must die": no HTTP/1.1 between a proxy and
-its back ends), so through a zone gateway the field reads `HTTP/2`; the kubelet's probes still show as
-`HTTP/1.1`. Try it: `curl --http2-prior-knowledge http://localhost:8080/status`.
+(h2c), `HTTP/1.1` otherwise. Since 0.5.2 the app listens on two ports: **8080 HTTP/1.1** (the kubelet's probes,
+which speak HTTP/1.1 until Kubernetes 1.38) and **8081 HTTP/2 only (h2c)**, the port a Service with
+`appProtocol: kubernetes.io/h2c` targets. Kestrel's default (`Http1AndHttp2`) is HTTP/1.1 alone on a port
+without TLS, because there is no ALPN to agree on HTTP/2 - 0.5.1 relied on it and every route behind Traefik
+answered 500. The OneK8s platform connects its gateways to pods over h2c only (design D69, "HTTP/1.1 must die":
+no HTTP/1.1 between a proxy and its back ends), so through a zone gateway the field reads `HTTP/2`. Try it:
+`curl --http2-prior-knowledge http://localhost:8081/status` and `curl http://localhost:8080/status`.
 
 ## The node's public IP (0.5.0)
 
@@ -58,7 +61,7 @@ address, and `PUBLIC_IP_DISABLED=true` turns it off. It never fails a probe.
 ```sh
 dotnet run --project src/AksHello
 # or
-docker build -t aks-hello . && docker run --rm -p 8080:8080 -e CLUSTER_NAME=local aks-hello
+docker build -t aks-hello . && docker run --rm -p 8080:8080 -p 8081:8081 -e CLUSTER_NAME=local aks-hello
 ```
 
 ## Releasing
