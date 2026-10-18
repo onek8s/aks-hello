@@ -88,7 +88,9 @@ app.MapGet("/weather", async (Weather weather, CancellationToken cancellationTok
 app.MapGet("/public-ip", (PublicIp publicIp) => publicIp.Current);
 
 // What is running where, for people and scripts: the same facts as the page, as JSON.
-app.MapGet("/status", (IHostApplicationLifetime lifetime, PublicIp publicIp) => new Status(
+// Protocol is what the caller spoke to this pod - "HTTP/2" when the gateway connects over h2c as the
+// platform requires (no HTTP/1.1 upstream), "HTTP/1.1" from the kubelet's probes or an old proxy.
+app.MapGet("/status", (HttpContext context, IHostApplicationLifetime lifetime, PublicIp publicIp) => new Status(
     Name: "aks-hello",
     Version: version,
     Cluster: cluster,
@@ -96,6 +98,7 @@ app.MapGet("/status", (IHostApplicationLifetime lifetime, PublicIp publicIp) => 
     NodePublicIp: publicIp.Current.Address,
     Pod: Environment.MachineName,
     Runtime: $".NET {Environment.Version}",
+    Protocol: context.Request.Protocol,
     Architecture: System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant(),
     StartedAt: started,
     UptimeSeconds: (long)(DateTimeOffset.UtcNow - started).TotalSeconds,
@@ -111,6 +114,7 @@ record Status(
     string? NodePublicIp,
     string Pod,
     string Runtime,
+    string Protocol,
     string Architecture,
     DateTimeOffset StartedAt,
     long UptimeSeconds,

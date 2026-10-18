@@ -33,6 +33,14 @@ most once a minute per pod; it never fails a probe. From 0.4.1 the forecast is r
 minute, within the cache time), so the page never waits for the internet and the dependency shows in the
 firewall's log even without visitors.
 
+## Which HTTP version reached the pod (0.5.1)
+
+`/status` reports `protocol`: `HTTP/2` when the caller connected over HTTP/2 cleartext with prior knowledge
+(h2c), `HTTP/1.1` otherwise. Kestrel serves both on the plain port 8080 by default. The OneK8s platform
+connects its gateways to pods over h2c only (design D69, "HTTP/1.1 must die": no HTTP/1.1 between a proxy and
+its back ends), so through a zone gateway the field reads `HTTP/2`; the kubelet's probes still show as
+`HTTP/1.1`. Try it: `curl --http2-prior-knowledge http://localhost:8080/status`.
+
 ## The node's public IP (0.5.0)
 
 The page and `/status` (`nodePublicIp`) also show the public IP the pod reaches the internet from, as an
@@ -78,7 +86,7 @@ does not read this repository itself.
 | Path | What |
 |---|---|
 | `/` | The page: cluster, pod, version, the node's public IP, the weather forecast |
-| `/status` | The same as JSON, plus node (`NODE_NAME`), architecture, start time, uptime and readiness |
+| `/status` | The same as JSON, plus node (`NODE_NAME`), architecture, the HTTP protocol the caller spoke (`protocol`, 0.5.1), start time, uptime and readiness |
 | `/weather` | The forecast as JSON, or why there is none |
 | `/public-ip` | The node's public IP found when the pod started, or why none was |
 | `/health/live` | Liveness: 200 while the process answers HTTP; checks nothing else |
