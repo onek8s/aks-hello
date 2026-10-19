@@ -17,9 +17,16 @@ for who owns what and how it is applied.
 
 ```
 src/AksHello/            # ASP.NET Core minimal app: `/` the page, `/status`, `/weather` and `/public-ip` JSON, `/health/*` probes
-Dockerfile               # SDK build, chiseled non-root ASP.NET Core runtime image
+Dockerfile               # SDK build, non-root Ubuntu ASP.NET Core runtime image with a shell
 .github/workflows/image.yml   # builds and smoke-tests the image
 ```
+
+## A shell for debugging (0.6.0)
+
+The runtime image is `mcr.microsoft.com/dotnet/aspnet:10.0-noble` (Ubuntu 24.04) instead of the chiseled one,
+so `kubectl exec -it <pod> -- bash` works for debugging; it still runs as the non-root user 1654 on a
+read-only root file system. There is no curl or other network tool in it: add one only to a debug container
+(`kubectl debug`).
 
 ## The weather forecast (0.4.0)
 

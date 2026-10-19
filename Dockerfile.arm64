@@ -10,7 +10,7 @@ RUN dotnet restore AksHello/AksHello.csproj -a arm64
 COPY src/AksHello/ AksHello/
 RUN dotnet publish AksHello/AksHello.csproj -a arm64 --no-self-contained --configuration Release --no-restore --output /app
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-arm64v8
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-arm64v8
 WORKDIR /app
 COPY --from=build /app .
 # HTTP/1.1 on 8080 (the kubelet's probes), h2c on 8081 (the gateway) - see Program.cs.

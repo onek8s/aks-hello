@@ -76,6 +76,8 @@ jobs:
           curl -fsS http://localhost:8080/public-ip | tee public-ip.json | grep -q '"error":null'
           grep -q '"nodePublicIp":"' <(curl -fsS http://localhost:8080/status)
           grep -q 'class="public-ip"' <(curl -fsS http://localhost:8080/)
+          # A shell for debugging (0.6.0)
+          docker exec hello bash -c 'id -u' | grep -qx 1654
           docker rm -f hello
 
   # The way the environment's registry builds the arm64 image: Dockerfile.arm64 with the classic
