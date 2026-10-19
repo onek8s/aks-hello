@@ -17,7 +17,8 @@ for who owns what and how it is applied.
 
 ```
 src/AksHello/            # ASP.NET Core minimal app: `/` the page, `/status`, `/weather` and `/public-ip` JSON, `/health/*` probes
-Dockerfile               # SDK build, non-root Ubuntu ASP.NET Core runtime image with a shell
+Dockerfile               # SDK build, non-root Ubuntu ASP.NET Core runtime image with a shell and network tools
+Dockerfile.arm64         # the same for arm64, built on an amd64 host (the registry)
 .github/workflows/image.yml   # builds and smoke-tests the image
 ```
 
@@ -25,8 +26,33 @@ Dockerfile               # SDK build, non-root Ubuntu ASP.NET Core runtime image
 
 The runtime image is `mcr.microsoft.com/dotnet/aspnet:10.0-noble` (Ubuntu 24.04) instead of the chiseled one,
 so `kubectl exec -it <pod> -- bash` works for debugging; it still runs as the non-root user 1654 on a
-read-only root file system. There is no curl or other network tool in it: add one only to a debug container
-(`kubectl debug`).
+read-only root file system.
+
+## Network tools for debugging (0.7.0)
+
+The image has `ifconfig` (net-tools), `ping` (iputils-ping), `curl` and `wget`, and all of them work as
+the non-root user 1654 in a pod of the restricted Pod Security Standard (every capability dropped, no
+privilege escalation):
+
+```sh
+kubectl exec -it <pod> -- bash
+ifconfig
+ping -c 3 <address>
+curl -sS https://api.ipify.org
+cd /tmp && wget https://api.ipify.org   # the root file system is read-only; /tmp is writable, or use wget -O -
+```
+
+`ping` has no file capability (`cap_net_raw`) and no setuid bit, which a container without `CAP_NET_RAW`
+could not use - the kernel refuses to run such a file. It sends with an ICMP datagram socket instead, which
+the kernel allows for the groups in the pod's `net.ipv4.ping_group_range` sysctl: aks-fluxcd-example's
+deployment sets it to the app's group (`1654 1654`; a safe sysctl, allowed by the restricted standard), and
+Docker and containerd 2 allow every group by default. Whether an echo reply comes back is the network's
+decision: the platform's egress control decides ICMP like any other traffic.
+
+The arm64 image is built on an amd64 host (`Dockerfile.arm64`), so its tools are not installed by running apt
+in it: apt on the amd64 SDK image downloads the arm64 packages against the runtime image's package
+database, and they are unpacked into the image together with that database, so `dpkg -l` and image
+scanners list them.
 
 ## The weather forecast (0.4.0)
 

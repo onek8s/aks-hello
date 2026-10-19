@@ -80,9 +80,25 @@ jobs:
           docker exec hello bash -c 'id -u' | grep -qx 1654
           docker rm -f hello
 
+      # The network tools (0.7.0), as the pod runs them: non-root, every capability dropped, no
+      # privilege escalation, read-only root file system, the pod's ping_group_range.
+      - name: Network tools
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker run --rm --cap-drop ALL --security-opt no-new-privileges --read-only --tmpfs /tmp \
+            --sysctl net.ipv4.ping_group_range='1654 1654' --entrypoint bash "aks-hello:${VERSION}" -c '
+              set -euxo pipefail
+              test "$(id -u)" = 1654
+              ifconfig lo | grep -q 127.0.0.1
+              ping -c 1 -W 5 127.0.0.1
+              curl -fsS https://api.ipify.org
+              wget -q -O - https://api.ipify.org
+              cd /tmp && wget -q https://api.ipify.org && test -s index.html'
+
   # The way the environment's registry builds the arm64 image: Dockerfile.arm64 with the classic
-  # builder on an amd64 host, which runs the SDK natively and cross-compiles. Nothing runs under
-  # emulation.
+  # builder on an amd64 host, which runs the SDK natively and cross-compiles. Nothing in the build
+  # runs under emulation; only the check of the network tools does, after it.
   registry:
     name: Build like the registry (Dockerfile.arm64 on amd64, classic builder)
     runs-on: ubuntu-latest
@@ -99,3 +115,18 @@ jobs:
           arch="$(docker image inspect aks-hello:registry --format '{{.Architecture}}')"
           echo "$arch"
           test "$arch" = arm64
+
+      # The tools are unpacked, not installed by apt in the image: check they run, as the pod runs them.
+      - name: Network tools (under emulation)
+        run: |
+          docker run --privileged --rm tonistiigi/binfmt:qemu-v9.2.2 --install arm64
+          docker run --rm --platform linux/arm64 --cap-drop ALL --security-opt no-new-privileges --read-only --tmpfs /tmp \
+            --sysctl net.ipv4.ping_group_range='1654 1654' --entrypoint bash aks-hello:registry -c '
+              set -euxo pipefail
+              test "$(uname -m)" = aarch64
+              test "$(id -u)" = 1654
+              ifconfig lo | grep -q 127.0.0.1
+              ping -c 1 -W 5 127.0.0.1
+              curl -fsS https://api.ipify.org
+              wget -q -O - https://api.ipify.org
+              dpkg -l curl wget iputils-ping net-tools | grep -c "^ii" | grep -qx 4'

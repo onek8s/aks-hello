@@ -1,7 +1,7 @@
 # The arm64 image, built on an amd64 host - the environment's registry, whose ACR tasks run on
 # amd64 (onek8s/aks-terraform, container_registry_builds). The SDK runs natively and publishes for
 # arm64: under emulation the C# compiler crashes. The runtime stage only copies files, so it can
-# take the arm64 image without running anything. Fixed tags rather than build arguments or
+# take the arm64 image without running anything - its network tools too (the tools stage below). Fixed tags rather than build arguments or
 # `--platform`, which the registry's dependency scanner cannot read. Keep in step with Dockerfile.
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
@@ -10,7 +10,39 @@ RUN dotnet restore AksHello/AksHello.csproj -a arm64
 COPY src/AksHello/ AksHello/
 RUN dotnet publish AksHello/AksHello.csproj -a arm64 --no-self-contained --configuration Release --no-restore --output /app
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-arm64v8
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-arm64v8 AS runtime
+
+# The network tools of Dockerfile (ifconfig, ping, curl, wget) for arm64, without running anything
+# arm64: apt on the amd64 SDK image (Ubuntu 24.04, as the runtime) resolves them against the
+# runtime's package database and downloads the arm64 packages, which are unpacked into /rootfs
+# together with that database, now listing them. /bin, /sbin and /lib go under /usr: in the runtime
+# they are links there, and a directory copied over one would hide it. None of the packages needs its
+# maintainer scripts; ping's would only add the file capability Dockerfile removes.
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS tools
+COPY --from=runtime /var/lib/dpkg/status /rootfs/var/lib/dpkg/status
+COPY --from=runtime /etc/apt/sources.list.d/ubuntu.sources /arm64/sources.list.d/
+RUN set -eu; \
+    mkdir -p /arm64/lists/partial /arm64/archives/partial /rootfs/var/lib/dpkg/info; \
+    apt() { apt-get -o APT::Architecture=arm64 -o APT::Architectures::=arm64 \
+        -o Dir::State::status=/rootfs/var/lib/dpkg/status -o Dir::State::lists=/arm64/lists \
+        -o Dir::Cache::archives=/arm64/archives -o Dir::Etc::sourcelist=/dev/null \
+        -o Dir::Etc::sourceparts=/arm64/sources.list.d "$@"; }; \
+    apt update; \
+    apt install -y --download-only --no-install-recommends ca-certificates curl wget iputils-ping net-tools; \
+    for deb in /arm64/archives/*.deb; do \
+        dpkg-deb -x "$deb" /rootfs; \
+        pkg="$(dpkg-deb -f "$deb" Package)"; \
+        list="$pkg"; [ "$(dpkg-deb -f "$deb" Multi-Arch)" != same ] || list="$pkg:arm64"; \
+        awk -v RS= -v ORS='\n\n' -v p="Package: $pkg" 'index($0, p "\n") != 1' /rootfs/var/lib/dpkg/status > /tmp/status; \
+        { cat /tmp/status; dpkg-deb -f "$deb" | sed '/^Package:/a Status: install ok installed'; echo; } > /rootfs/var/lib/dpkg/status; \
+        dpkg-deb -c "$deb" | awk '{ sub(/^\./, "", $6); print ($6 == "/" ? "/." : $6) }' > "/rootfs/var/lib/dpkg/info/$list.list"; \
+    done; \
+    for dir in bin sbin lib; do \
+        if [ -d "/rootfs/$dir" ]; then mkdir -p "/rootfs/usr/$dir"; cp -a "/rootfs/$dir/." "/rootfs/usr/$dir/"; rm -r "/rootfs/$dir"; fi; \
+    done
+
+FROM runtime
+COPY --from=tools /rootfs/ /
 WORKDIR /app
 COPY --from=build /app .
 # HTTP/1.1 on 8080 (the kubelet's probes), h2c on 8081 (the gateway) - see Program.cs.
