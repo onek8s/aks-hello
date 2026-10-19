@@ -1,6 +1,6 @@
-# Build with the SDK, run on the chiseled ASP.NET Core runtime: no shell, no package manager, and a
-# non-root user (UID 1654) by default - which is what the restricted Pod Security Standard of the
-# team namespaces asks for.
+# Build with the SDK, run on the Ubuntu ASP.NET Core runtime: a shell (bash, coreutils) for
+# `kubectl exec` when debugging (0.6.0; the chiseled image had none), and the non-root user (UID 1654)
+# that the restricted Pod Security Standard of the team namespaces asks for.
 #
 # For a build on a host of the image's own architecture: BuildKit on an amd64 or arm64 runner, or
 # the environment's registry for amd64. The registry builds arm64 images on its amd64 host with
@@ -14,7 +14,7 @@ RUN dotnet restore AksHello/AksHello.csproj ${TARGETARCH:+-a "$TARGETARCH"}
 COPY src/AksHello/ AksHello/
 RUN dotnet publish AksHello/AksHello.csproj ${TARGETARCH:+-a "$TARGETARCH"} --no-self-contained --configuration Release --no-restore --output /app
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble
 WORKDIR /app
 COPY --from=build /app .
 # HTTP/1.1 on 8080 (the kubelet's probes), h2c on 8081 (the gateway) - see Program.cs.
