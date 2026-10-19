@@ -15,6 +15,16 @@ COPY src/AksHello/ AksHello/
 RUN dotnet publish AksHello/AksHello.csproj ${TARGETARCH:+-a "$TARGETARCH"} --no-self-contained --configuration Release --no-restore --output /app
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble
+# Network tools for debugging in the pod (0.7.0): ifconfig (net-tools), ping (iputils-ping), curl and
+# wget. All of them work as the non-root user with every capability dropped: ping's file capability
+# (cap_net_raw=ep) is removed, since the kernel refuses to run such a file in a container without
+# CAP_NET_RAW, and ping uses an ICMP datagram socket instead, which the kernel allows for the groups
+# in net.ipv4.ping_group_range (the pod sets it; containerd 2 and Docker do by default).
+# Keep in step with Dockerfile.arm64.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl wget iputils-ping net-tools \
+    && setcap -r /usr/bin/ping \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app .
 # HTTP/1.1 on 8080 (the kubelet's probes), h2c on 8081 (the gateway) - see Program.cs.
