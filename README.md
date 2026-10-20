@@ -121,13 +121,29 @@ does not read this repository itself.
 
 | Path | What |
 |---|---|
-| `/` | The page: cluster, pod, version, the node's public IP, the weather forecast |
+| `/` | The page: cluster, pod, version, the node's public IP, the weather forecast, the peers |
 | `/status` | The same as JSON, plus node (`NODE_NAME`), architecture, the HTTP protocol the caller spoke (`protocol`, 0.5.1), start time, uptime and readiness |
 | `/weather` | The forecast as JSON, or why there is none |
 | `/public-ip` | The node's public IP found when the pod started, or why none was |
+| `/peers` | The peers (`PEERS`, 0.8.0): each one's URL, the last poll's answer or error, and the counts since the pod started |
 | `/health/live` | Liveness: 200 while the process answers HTTP; checks nothing else |
 | `/health/ready` | Readiness: 200 from the end of startup until SIGTERM, then 503 |
 | `/healthz` | All checks (the probe path before 0.3.0) |
+
+## Peers (0.8.0)
+
+`PEERS` names other instances of this application to poll, `<name>=<url>` separated by `;`, every
+`PEERS_INTERVAL_SECONDS` (default 60) with a 5 second timeout; the page and `/peers` show each one's last
+answer (the HTTP status and, when the peer is this application's `/status`, which pod and cluster answered)
+or error, and the counts since the pod started. The poll speaks HTTP/2 only, like the platform's gateways and
+Services: h2c with prior knowledge on a plain URL, ALPN `h2` over TLS.
+
+What it is for: the same application in another isolation zone, once by its cluster-internal Service name
+(`http://aks-hello.<zone>-example.svc.cluster.local/status`) and once by its published name
+(`https://hello.<zone>.<env>.example.com/status`). The first is never reachable (the platform's network
+policies drop it at the source, or the hub firewall denies and logs the pod's flow); the second only when the
+zone's firewall rule file names it - the firewall's log then shows the flow, allowed or denied, with this pod
+as its source, every interval. Never a health check: an unreachable peer is not a reason to stop serving.
 
 ## Which cluster answered
 
