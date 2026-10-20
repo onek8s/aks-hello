@@ -40,6 +40,21 @@ builder.Services.AddHttpClient("public-ip", client =>
 });
 builder.Services.AddSingleton<PublicIp>();
 builder.Services.AddHostedService<PublicIpChecker>();
+// The peers (0.8.0): other instances of this application that this pod polls every PEERS_INTERVAL_SECONDS
+// (default 60) - the same application in another isolation zone, by its cluster-internal Service name and
+// by its published name, so the platform's isolation is visible on the page and in the firewall's log:
+// every attempt is one flow, allowed or denied, with this pod as its source. HTTP/2 only (the platform's
+// gateways and Services speak nothing else, design D69): h2c with prior knowledge on a plain URL, ALPN h2
+// over TLS. Never a health check.
+builder.Services.AddHttpClient("peers", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(5);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("aks-hello (+https://github.com/onek8s/aks-hello)");
+    client.DefaultRequestVersion = HttpVersion.Version20;
+    client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact;
+});
+builder.Services.AddSingleton<Peers>();
+builder.Services.AddHostedService<PeersPoller>();
 
 var app = builder.Build();
 var started = DateTimeOffset.UtcNow;
@@ -51,7 +66,7 @@ var version = Assembly.GetExecutingAssembly()
 // served by several clusters at once, it is what tells a visitor which one answered.
 var cluster = Environment.GetEnvironmentVariable("CLUSTER_NAME") is { Length: > 0 } name ? name : "unknown";
 
-app.MapGet("/", async (Weather weather, PublicIp publicIp, CancellationToken cancellationToken) => Results.Content($$"""
+app.MapGet("/", async (Weather weather, PublicIp publicIp, Peers peers, CancellationToken cancellationToken) => Results.Content($$"""
     <!doctype html>
     <html lang="en">
     <head>
@@ -68,6 +83,11 @@ app.MapGet("/", async (Weather weather, PublicIp publicIp, CancellationToken can
         .weather { margin-top: 1.5rem; }
         .weather.error { color: #ab091e; }
         .public-ip.error { color: #ab091e; }
+        .peers { margin-top: 1.5rem; text-align: left; display: inline-block; }
+        .peers table { border-collapse: collapse; }
+        .peers th, .peers td { padding: .2rem .6rem; border-bottom: 1px solid #e4e7eb; vertical-align: top; }
+        .peers .ok { color: #0b6b2f; }
+        .peers .error { color: #ab091e; }
       </style>
     </head>
     <body>
@@ -78,6 +98,7 @@ app.MapGet("/", async (Weather weather, PublicIp publicIp, CancellationToken can
         <p>Version <code>{{WebUtility.HtmlEncode(version)}}</code></p>
         {{publicIp.Current.ToHtml()}}
         {{(await weather.GetAsync(cancellationToken)).ToHtml()}}
+        {{peers.ToHtml()}}
       </main>
     </body>
     </html>
@@ -96,6 +117,10 @@ app.MapGet("/weather", async (Weather weather, CancellationToken cancellationTok
 
 // The node's public IP as JSON: what was found when the pod started, or why nothing was.
 app.MapGet("/public-ip", (PublicIp publicIp) => publicIp.Current);
+
+// The peers as JSON (0.8.0): every peer's URL and the result of the last poll - the HTTP status and what the
+// peer said it is, or why there was no answer - with the counts since the pod started.
+app.MapGet("/peers", (Peers peers) => peers.Current);
 
 // What is running where, for people and scripts: the same facts as the page, as JSON.
 // Protocol is what the caller spoke to this pod - "HTTP/2" when the gateway connects over h2c as the
@@ -134,6 +159,7 @@ record Status(
 [JsonSerializable(typeof(Status))]
 [JsonSerializable(typeof(Forecast))]
 [JsonSerializable(typeof(PublicIpResult))]
+[JsonSerializable(typeof(PeerResult[]))]
 partial class AppJsonContext : JsonSerializerContext;
 
 sealed class LifetimeCheck(IHostApplicationLifetime lifetime) : IHealthCheck
@@ -310,5 +336,125 @@ sealed class PublicIpChecker(PublicIp publicIp) : BackgroundService
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
         }
+    }
+}
+
+// The peers (0.8.0): PEERS names them, `<name>=<url>` separated by `;` - for example the same application
+// in another isolation zone, once by its cluster-internal Service name (http://aks-hello.<zone>-example.svc
+// .cluster.local/status) and once by its published name (https://hello.<zone>.<env>.example.com/status).
+// Each is polled every PEERS_INTERVAL_SECONDS (default 60) with a 5 second timeout; the page and /peers
+// show the last result and the counts. What the poll proves is the platform's isolation: a peer in another
+// zone is never reachable by its Service name (Cilium drops it at the source, or the hub firewall denies
+// and logs the pod's flow), and by its published name only when the zone's firewall rule file names it -
+// then the firewall's log shows the flow allowed, with this pod as its source.
+sealed class Peers(IHttpClientFactory httpClientFactory, ILogger<Peers> logger)
+{
+    static readonly (string Name, string Url)[] configured = (Environment.GetEnvironmentVariable("PEERS") ?? "")
+        .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(entry => entry.Split('=', 2, StringSplitOptions.TrimEntries))
+        .Where(parts => parts.Length == 2 && parts[0].Length > 0 && Uri.TryCreate(parts[1], UriKind.Absolute, out _))
+        .Select(parts => (parts[0], parts[1]))
+        .ToArray();
+
+    public static TimeSpan Interval { get; } = TimeSpan.FromSeconds(int.TryParse(Environment.GetEnvironmentVariable("PEERS_INTERVAL_SECONDS"), out var seconds) && seconds > 0 ? seconds : 60);
+
+    readonly Dictionary<string, PeerResult> results = configured.ToDictionary(
+        peer => peer.Name,
+        peer => new PeerResult(peer.Name, peer.Url, null, null, "not polled yet", null, 0, 0));
+
+    public PeerResult[] Current
+    {
+        get { lock (results) return configured.Select(peer => results[peer.Name]).ToArray(); }
+    }
+
+    public async Task PollAsync(CancellationToken cancellationToken)
+    {
+        foreach (var (name, url) in configured)
+        {
+            PeerResult previous;
+            lock (results) previous = results[name];
+            var result = await PollOneAsync(previous, cancellationToken);
+            lock (results) results[name] = result;
+        }
+    }
+
+    async Task<PeerResult> PollOneAsync(PeerResult previous, CancellationToken cancellationToken)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            using var response = await httpClientFactory.CreateClient("peers").GetAsync(previous.Url, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            var answer = $"HTTP/{response.Version} {(int)response.StatusCode}";
+            // A peer that is this application says which cluster and pod answered (its /status).
+            try
+            {
+                using var document = System.Text.Json.JsonDocument.Parse(body);
+                if (document.RootElement.TryGetProperty("cluster", out var cluster) && document.RootElement.TryGetProperty("pod", out var pod))
+                    answer += $" from pod {pod.GetString()} in cluster {cluster.GetString()}";
+            }
+            catch (System.Text.Json.JsonException)
+            {
+            }
+            var ok = response.IsSuccessStatusCode;
+            return previous with
+            {
+                Answer = answer,
+                MillisecondsTaken = watch.ElapsedMilliseconds,
+                Error = ok ? null : $"status {(int)response.StatusCode}",
+                PolledAt = DateTimeOffset.UtcNow,
+                Successes = previous.Successes + (ok ? 1 : 0),
+                Failures = previous.Failures + (ok ? 0 : 1),
+            };
+        }
+        catch (Exception e) when (!cancellationToken.IsCancellationRequested && e is HttpRequestException or TaskCanceledException)
+        {
+            var reason = e is TaskCanceledException ? "timed out" : e.GetBaseException().Message;
+            logger.LogWarning("Peer {Peer} ({Url}) failed: {Reason}", previous.Name, previous.Url, reason);
+            return previous with
+            {
+                Answer = null,
+                MillisecondsTaken = watch.ElapsedMilliseconds,
+                Error = reason,
+                PolledAt = DateTimeOffset.UtcNow,
+                Failures = previous.Failures + 1,
+            };
+        }
+    }
+
+    public string ToHtml()
+    {
+        if (configured.Length == 0)
+            return "";
+        var rows = string.Join("", Current.Select(peer =>
+            $"<tr><td>{WebUtility.HtmlEncode(peer.Name)}<br><code>{WebUtility.HtmlEncode(peer.Url)}</code></td>"
+            + (peer.Error is null
+                ? $"<td class=\"ok\">{WebUtility.HtmlEncode(peer.Answer)} ({peer.MillisecondsTaken} ms)</td>"
+                : $"<td class=\"error\">{WebUtility.HtmlEncode(peer.Error)}{(peer.Answer is null ? "" : $" ({WebUtility.HtmlEncode(peer.Answer)})")}</td>")
+            + $"<td>{peer.Successes} ok, {peer.Failures} failed{(peer.PolledAt is null ? "" : $", last {peer.PolledAt:HH:mm:ss} UTC")}</td></tr>"));
+        return $"<div class=\"peers\"><p>Peers, polled every {(int)Interval.TotalSeconds} s:</p><table><tr><th>Peer</th><th>Last answer</th><th>Since the pod started</th></tr>{rows}</table></div>";
+    }
+}
+
+record PeerResult(string Name, string Url, string? Answer, long? MillisecondsTaken, string? Error, DateTimeOffset? PolledAt, long Successes, long Failures);
+
+// Polls the peers on the interval, from the moment the pod starts; the page never waits for a peer.
+sealed class PeersPoller(Peers peers) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        using var timer = new PeriodicTimer(Peers.Interval);
+        do
+        {
+            try
+            {
+                await peers.PollAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+        }
+        while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 }
