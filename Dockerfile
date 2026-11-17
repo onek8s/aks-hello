@@ -6,7 +6,7 @@
 # the environment's registry for amd64. The registry builds arm64 images on its amd64 host with
 # Dockerfile.arm64 instead, which cross-compiles. No `--platform` in FROM: the registry's
 # dependency scanner cannot read it.
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:11.0 AS build
 ARG TARGETARCH
 WORKDIR /src
 COPY src/AksHello/AksHello.csproj AksHello/
