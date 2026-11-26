@@ -77,6 +77,11 @@ answered 500. The OneK8s platform connects its gateways to pods over h2c only (d
 no HTTP/1.1 between a proxy and its back ends), so through a zone gateway the field reads `HTTP/2`. Try it:
 `curl --http2-prior-knowledge http://localhost:8081/status` and `curl http://localhost:8080/status`.
 
+Since 0.8.1 the h2c port accepts a `:scheme` of `https` on its cleartext connection: a gateway that terminated
+TLS forwards the client's scheme (App Routing's Istio, Envoy, does), and Kestrel resets such a stream with
+`PROTOCOL_ERROR` unless `AllowAlternateSchemes` is on - every route answered 502 behind it with 0.8.0. CI
+requests the port both ways (`tests/h2c_gateway.py`).
+
 ## The node's public IP (0.5.0)
 
 The page and `/status` (`nodePublicIp`) also show the public IP the pod reaches the internet from, as an

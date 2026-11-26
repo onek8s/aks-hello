@@ -12,6 +12,10 @@ var builder = WebApplication.CreateSlimBuilder(args);
 // speaking h2c to it fails - which 0.5.1 did behind Traefik (500 on every route, 2026-10-18).
 builder.WebHost.ConfigureKestrel(kestrel =>
 {
+    // A gateway that terminated TLS forwards the client's `:scheme`, https, on its cleartext HTTP/2
+    // connection (App Routing's Istio, Envoy, does). Kestrel resets such a stream with PROTOCOL_ERROR
+    // unless alternate schemes are allowed - which made every route answer 502 behind it (0.8.0).
+    kestrel.AllowAlternateSchemes = true;
     kestrel.ListenAnyIP(8080, listen => listen.Protocols = HttpProtocols.Http1);
     kestrel.ListenAnyIP(8081, listen => listen.Protocols = HttpProtocols.Http2);
 });
